@@ -1,0 +1,19 @@
+{
+  "name": "lockpick-game",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "pinia": "^2.0.0",
+    "vue": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "@vitejs/plugin-vue": "^4.0.0",
+    "typescript": "^4.5.0",
+    "vite": "^4.0.0"
+  }
+}
