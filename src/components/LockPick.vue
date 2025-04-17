@@ -1,11 +1,15 @@
 <template>
   <div class="lockpick-container">
+    <!-- Progress HUD -->
     <div class="progress-hud">
       <div class="circle" :class="{ filled: currentLevel > 0 }"></div>
       <div class="circle" :class="{ filled: currentLevel > 1 }"></div>
     </div>
 
+    <!-- Lock Feedback Shimmer -->
     <div class="lock-shimmer" :class="shimmerClass" />
+
+    <!-- Dietrich Feedback Indicator -->
     <div
       v-if="nearLockSweetspot"
       class="center-indicator"
@@ -13,8 +17,10 @@
       :style="{ transform: `translate(-50%, -50%) scale(${pulseScale})` }"
     />
 
+    <!-- Schloss -->
     <img src="/schloss.png" class="lock-img" :style="lockStyle" />
 
+    <!-- Dietrich (SVG) -->
     <svg class="dietrich-svg" width="500" height="500">
       <g
         :transform="`rotate(${hasLockedPick ? finalAngle : currentAngle}, 250, 320)`"
@@ -34,12 +40,14 @@
       </g>
     </svg>
 
+    <!-- Schraubenzieher -->
     <img
       src="/schraubenzieher.png"
       class="screwdriver-img"
       :class="{ active: nearLockSweetspot || isRotating }"
     />
 
+    <!-- Angle Regler -->
     <input
       type="range"
       min="-180"
@@ -49,6 +57,7 @@
       :disabled="lockUnlocked || !nearLockSweetspot"
     />
 
+    <!-- Status -->
     <div class="status" v-if="lockUnlocked">✅ Schloss geöffnet!</div>
     <div class="status fail" v-if="isBroken">💥 Dietrich gebrochen!</div>
   </div>
@@ -115,12 +124,21 @@ const feedbackLevel = computed(() => {
 })
 
 const pulseScale = computed(() => {
+  if (!nearLockSweetspot.value) return 0.8
+
   const diff = Math.abs(currentAngle.value - targetPickAngle.value)
-  if (!nearLockSweetspot.value) return 0
+  const direction = targetPickAngle.value - currentAngle.value
+  const movingToward =
+    (direction > 0 && currentAngle.value > finalAngle.value) ||
+    (direction < 0 && currentAngle.value < finalAngle.value)
+
   if (diff < 5) return 1.3
-  if (diff < 15) return 1.1
+  if (diff < 15) return 1.15
+  if (diff < 30 && movingToward) return 1.05 // 🔥 NEU: größer im ROT bei richtiger Richtung
+
   return 0.9
 })
+
 
 function setNewTargetAngles() {
   let newLock = 0, newPick = 0
@@ -168,16 +186,14 @@ watch([lockRotation, currentAngle], () => {
     hasLockedPick.value = true
 
     if (currentLevel.value < 2) {
-      setTimeout(() => {
-        setNewTargetAngles()
-      }, 600)
+      setTimeout(() => setNewTargetAngles(), 600)
     }
   }
 })
 
 let lastAngle = currentAngle.value
 let lastTime = Date.now()
-let wrongDirectionStartAngle = currentAngle.value
+let lastDamageAt = Date.now()
 
 watch(currentAngle, (newVal) => {
   if (isBroken.value || lockUnlocked.value || !nearLockSweetspot.value) return
@@ -193,31 +209,16 @@ watch(currentAngle, (newVal) => {
     hasLockedPick.value = true
   }
 
-  const movingTowardSweetspot =
-    (newVal > targetPickAngle.value && newVal > lastAngle) ||
-    (newVal < targetPickAngle.value && newVal < lastAngle)
+  const movingAway =
+    (newVal > lastAngle && newVal > targetPickAngle.value) ||
+    (newVal < lastAngle && newVal < targetPickAngle.value)
 
-  const movedWrong = Math.abs(newVal - wrongDirectionStartAngle)
-
-  if (!hasLockedPick.value) {
-    if (!movingTowardSweetspot && movedWrong >= 20) {
-      damageScore.value++
-      wrongDirectionStartAngle = newVal
-      isDamaged.value = true
-      setTimeout(() => (isDamaged.value = false), 200)
-      if (damageScore.value >= maxDamage) isBroken.value = true
-    }
-
-    if (speed > breakSpeed) {
-      damageScore.value++
-      isDamaged.value = true
-      setTimeout(() => (isDamaged.value = false), 200)
-      if (damageScore.value >= maxDamage) isBroken.value = true
-    }
-
-    if (movingTowardSweetspot) {
-      wrongDirectionStartAngle = newVal // reset
-    }
+  if (!hasLockedPick.value && movingAway && diff > 20 && (now - lastDamageAt > 800 || speed > breakSpeed)) {
+    damageScore.value++
+    lastDamageAt = now
+    isDamaged.value = true
+    setTimeout(() => isDamaged.value = false, 200)
+    if (damageScore.value >= maxDamage) isBroken.value = true
   }
 
   lastAngle = newVal
@@ -239,14 +240,12 @@ onMounted(() => {
   window.addEventListener('keydown', handleKey)
   window.addEventListener('keyup', handleKey)
 })
-
 onUnmounted(() => {
   if (rotationInterval) clearInterval(rotationInterval)
   window.removeEventListener('keydown', handleKey)
   window.removeEventListener('keyup', handleKey)
 })
 </script>
-
 
 <style scoped>
 .lockpick-container {
@@ -261,7 +260,6 @@ onUnmounted(() => {
   box-shadow: 0 0 40px rgba(42, 167, 161, 0.2);
 }
 
-/* Schimmer mit radialem Glow-Effekt */
 .lock-shimmer {
   position: absolute;
   top: 50%;
@@ -270,7 +268,7 @@ onUnmounted(() => {
   height: 240px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  z-index: 3; /* ÜBER dem Lock-Image */
+  z-index: 3;
   pointer-events: none;
   background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
   mix-blend-mode: screen;
@@ -284,10 +282,7 @@ onUnmounted(() => {
 .lock-shimmer.green {
   background: radial-gradient(circle, rgba(0, 255, 150, 0.4), transparent 80%);
 }
-
-.shimmer {
-  animation: pulse 1.3s infinite;
-}
+.shimmer { animation: pulse 1.3s infinite; }
 @keyframes pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
   50% { transform: translate(-50%, -50%) scale(1.07); }
@@ -298,10 +293,9 @@ onUnmounted(() => {
   top: 50%;
   left: 50%;
   border-radius: 50%;
-  transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 4;
-  transition: all 0.3s ease-in-out;
+  transition: transform 0.3s ease, background 0.2s ease, border 0.2s ease;
 }
 .indicator-red {
   width: 24px;
@@ -320,11 +314,16 @@ onUnmounted(() => {
   height: 45px;
   background: rgba(0, 255, 150, 0.12);
   border: 2px solid #00ff8a;
-  animation: pulsePick 1.1s infinite;
 }
-@keyframes pulsePick {
-  0%, 100% { transform: translate(-50%, -50%) scale(1); }
-  50% { transform: translate(-50%, -50%) scale(1.2); }
+
+.lock-img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 300px;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
 }
 
 .progress-hud {
@@ -345,16 +344,6 @@ onUnmounted(() => {
 }
 .circle.filled { background-color: #00ff6e; }
 
-.lock-img {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 300px;
-  transform: translate(-50%, -50%);
-  z-index: 2;
-  pointer-events: none;
-}
-
 .dietrich-svg {
   position: absolute;
   top: 0;
@@ -365,10 +354,7 @@ onUnmounted(() => {
   z-index: 4;
 }
 .dietrich-svg g {
-  transition: transform 0.3s ease-in-out;
-}
-.dietrich-svg .shake {
-  animation: shake 0.3s ease-in-out infinite;
+  transition: transform 0.25s ease-in-out;
 }
 .dietrich-svg .broken {
   opacity: 0.2;
@@ -376,13 +362,6 @@ onUnmounted(() => {
 .dietrich-svg .damaged line {
   stroke: #ff4d4d;
   filter: drop-shadow(0 0 2px #ff4d4d);
-  transition: stroke 0.3s;
-}
-
-@keyframes shake {
-  0% { transform: rotate(0deg); }
-  50% { transform: rotate(1deg); }
-  100% { transform: rotate(-1deg); }
 }
 
 .screwdriver-img {
