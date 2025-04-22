@@ -1,33 +1,46 @@
 <template>
   <div class="lockpick-container">
-    <!-- Progress HUD -->
+    <!-- HUD -->
+    
+    <!-- Fortschrittsanzeige (3 Kreise für lock, pick, final) -->
     <div class="progress-hud">
-      <div class="circle" :class="{ filled: currentLevel > 0 }"></div>
-      <div class="circle" :class="{ filled: currentLevel > 1 }"></div>
+      <div class="circle" :class="{ filled: ['pick', 'final', 'done'].includes(store.phase) }"></div>
+      <div class="circle" :class="{ filled: ['final', 'done'].includes(store.phase) }"></div>
+      <div class="circle" :class="{ filled: store.phase === 'done' }"></div>
     </div>
 
-    <!-- Lock Feedback Shimmer -->
-    <div class="lock-shimmer" :class="shimmerClass" />
-
-    <!-- Dietrich Feedback Indicator -->
+    <!-- Shimmer Lock Feedback -->
     <div
-      v-if="nearLockSweetspot"
-      class="center-indicator"
-      :class="feedbackLevel"
-      :style="{ transform: `translate(-50%, -50%) scale(${pulseScale})` }"
+      v-if="store.phase !== 'final'"
+      class="lock-shimmer"
+      :class="store.shimmerClass"
     />
 
-    <!-- Schloss -->
+    <!-- Pick Feedback Indicator -->
+    <div
+      v-if="store.phase !== 'lock' && store.phase !== 'final'"
+      class="center-indicator"
+      :class="store.feedbackLevel"
+      :style="{ transform: `translate(-50%, -50%) scale(${store.pulseScale})` }"
+    />
+
+    <!-- Lock Image -->
     <img src="/schloss.png" class="lock-img" :style="lockStyle" />
 
-    <!-- Dietrich (SVG) -->
+    <div class="result-box" v-if="store.lockUnlocked || store.isBroken">
+  <div class="status" :class="{ success: store.lockUnlocked, fail: store.isBroken }">
+    {{ store.lockUnlocked ? '✅ Schloss geöffnet!' : '💥 Dietrich gebrochen!' }}
+  </div>
+</div>
+
+    <!-- Dietrich SVG -->
     <svg class="dietrich-svg" width="500" height="500">
       <g
-        :transform="`rotate(${hasLockedPick ? finalAngle : currentAngle}, 250, 320)`"
-        :class="{ broken: isBroken, damaged: isDamaged }"
+        :transform="`rotate(${store.hasLockedPick ? store.lockedPickAngle : store.currentAngle}, 250, 290)`"
+        :class="{ broken: store.isBroken, damaged: store.isDamaged }"
       >
         <line
-          v-if="!isBroken"
+          v-if="!store.isBroken"
           x1="250"
           y1="60"
           x2="250"
@@ -44,204 +57,53 @@
     <img
       src="/schraubenzieher.png"
       class="screwdriver-img"
-      :class="{ active: nearLockSweetspot || isRotating }"
+      :class="{ active: store.isRotating || store.phase === 'sync' || store.phase === 'final' }"
     />
 
-    <!-- Angle Regler -->
+    <!-- Slider -->
     <input
       type="range"
       min="-180"
       max="180"
-      v-model="currentAngle"
+      :value="store.currentAngle"
+      @input="onAngleInput"
       class="angle-slider"
-      :disabled="lockUnlocked || !nearLockSweetspot"
+      :disabled="store.phase === 'lock' || store.lockUnlocked"
     />
-
-    <!-- Status -->
-    <div class="status" v-if="lockUnlocked">✅ Schloss geöffnet!</div>
-    <div class="status fail" v-if="isBroken">💥 Dietrich gebrochen!</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, computed } from 'vue'
+import { useLockStore } from '@/store/lockStore'
 
-const currentLevel = ref(0)
-const isBroken = ref(false)
-const isDamaged = ref(false)
-const lockUnlocked = computed(() => currentLevel.value >= 2)
-
-const lockRotation = ref(0)
-const currentAngle = ref(0)
-const finalAngle = ref(0)
-
-const targetLockAngle = ref(0)
-const targetPickAngle = ref(0)
-
-const pickTolerance = Math.random() * 2 + 3
-const lockTolerance = Math.random() * 2 + 3
-const breakSpeed = 75
-const maxDamage = 8
-
-const isRotating = ref(false)
-const pickLocked = ref(false)
-const hasLockedPick = ref(false)
-const damageScore = ref(0)
-
-let rotationInterval: ReturnType<typeof setInterval> | null = null
-const rotationDir = ref<'left' | 'right' | null>(null)
-
-const nearLockSweetspot = computed(() =>
-  Math.abs(lockRotation.value - targetLockAngle.value) < lockTolerance
-)
-const nearPickSweetspot = computed(() =>
-  Math.abs(currentAngle.value - targetPickAngle.value) < pickTolerance
-)
-
-const shimmerClass = computed(() => {
-  if (nearLockSweetspot.value) return 'green shimmer'
-  const diff = targetLockAngle.value - lockRotation.value
-  const movingRight = rotationDir.value === 'right'
-  const movingLeft = rotationDir.value === 'left'
-  if ((movingRight && diff > 0) || (movingLeft && diff < 0)) return 'orange shimmer'
-  return 'red shimmer'
-})
-
-const lockStyle = computed(() => ({
-  transform: `translate(-50%, -50%) rotate(${lockRotation.value}deg)`
-}))
-
-const feedbackLevel = computed(() => {
-  if (!nearLockSweetspot.value) return ''
-  const diff = targetPickAngle.value - currentAngle.value
-  const movingToward =
-    (diff > 0 && currentAngle.value < targetPickAngle.value) ||
-    (diff < 0 && currentAngle.value > targetPickAngle.value)
-
-  if (Math.abs(diff) < 5) return 'indicator-green'
-  if (Math.abs(diff) < 20 && movingToward) return 'indicator-orange'
-  return 'indicator-red'
-})
-
-const pulseScale = computed(() => {
-  if (!nearLockSweetspot.value) return 0.8
-
-  const diff = Math.abs(currentAngle.value - targetPickAngle.value)
-  const direction = targetPickAngle.value - currentAngle.value
-  const movingToward =
-    (direction > 0 && currentAngle.value > finalAngle.value) ||
-    (direction < 0 && currentAngle.value < finalAngle.value)
-
-  if (diff < 5) return 1.3
-  if (diff < 15) return 1.15
-  if (diff < 30 && movingToward) return 1.05 // 🔥 NEU: größer im ROT bei richtiger Richtung
-
-  return 0.9
-})
-
-
-function setNewTargetAngles() {
-  let newLock = 0, newPick = 0
-  do {
-    newLock = Math.random() * 180 - 90
-    newPick = Math.random() * 180 - 90
-  } while (
-    Math.abs(newLock - targetLockAngle.value) < 25 ||
-    Math.abs(newPick - targetPickAngle.value) < 25
-  )
-  targetLockAngle.value = newLock
-  targetPickAngle.value = newPick
-
-  currentAngle.value = 0
-  lockRotation.value = 0
-  finalAngle.value = 0
-  pickLocked.value = false
-  hasLockedPick.value = false
-  isBroken.value = false
-  isDamaged.value = false
-  damageScore.value = 0
-}
-
-function startRotation(dir: 'left' | 'right') {
-  if (rotationInterval) clearInterval(rotationInterval)
-  rotationDir.value = dir
-  isRotating.value = true
-  rotationInterval = setInterval(() => {
-    if (isBroken.value || lockUnlocked.value) return
-    lockRotation.value += dir === 'right' ? 0.5 : -0.5
-  }, 16)
-}
-
-function stopRotation() {
-  if (rotationInterval) clearInterval(rotationInterval)
-  isRotating.value = false
-  rotationDir.value = null
-}
-
-watch([lockRotation, currentAngle], () => {
-  if (isBroken.value || lockUnlocked.value) return
-  if (nearLockSweetspot.value && nearPickSweetspot.value && !pickLocked.value) {
-    currentLevel.value++
-    pickLocked.value = true
-    hasLockedPick.value = true
-
-    if (currentLevel.value < 2) {
-      setTimeout(() => setNewTargetAngles(), 600)
-    }
-  }
-})
-
-let lastAngle = currentAngle.value
-let lastTime = Date.now()
-let lastDamageAt = Date.now()
-
-watch(currentAngle, (newVal) => {
-  if (isBroken.value || lockUnlocked.value || !nearLockSweetspot.value) return
-
-  const now = Date.now()
-  const delta = Math.abs(newVal - lastAngle)
-  const timeDiff = now - lastTime
-  const speed = delta / (timeDiff / 1000)
-  const diff = Math.abs(newVal - targetPickAngle.value)
-
-  if (!hasLockedPick.value && diff < 15) {
-    finalAngle.value = newVal
-    hasLockedPick.value = true
-  }
-
-  const movingAway =
-    (newVal > lastAngle && newVal > targetPickAngle.value) ||
-    (newVal < lastAngle && newVal < targetPickAngle.value)
-
-  if (!hasLockedPick.value && movingAway && diff > 20 && (now - lastDamageAt > 800 || speed > breakSpeed)) {
-    damageScore.value++
-    lastDamageAt = now
-    isDamaged.value = true
-    setTimeout(() => isDamaged.value = false, 200)
-    if (damageScore.value >= maxDamage) isBroken.value = true
-  }
-
-  lastAngle = newVal
-  lastTime = now
-})
+const store = useLockStore()
 
 function handleKey(e: KeyboardEvent) {
   if (e.code === 'KeyA') {
-    if (e.type === 'keydown') startRotation('left')
-    else stopRotation()
+    e.type === 'keydown' ? store.startRotation('left') : store.stopRotation()
   } else if (e.code === 'KeyD') {
-    if (e.type === 'keydown') startRotation('right')
-    else stopRotation()
+    e.type === 'keydown' ? store.startRotation('right') : store.stopRotation()
   }
 }
 
+function onAngleInput(e: Event) {
+  const val = (e.target as HTMLInputElement)?.valueAsNumber
+  store.setCurrentAngle(val)
+  store.checkLockProgress()
+}
+
+const lockStyle = computed(() => ({
+  transform: `translate(-50%, -50%) rotate(${store.lockRotation}deg)`
+}))
+
 onMounted(() => {
-  setNewTargetAngles()
+  store.initLock()
   window.addEventListener('keydown', handleKey)
   window.addEventListener('keyup', handleKey)
 })
+
 onUnmounted(() => {
-  if (rotationInterval) clearInterval(rotationInterval)
   window.removeEventListener('keydown', handleKey)
   window.removeEventListener('keyup', handleKey)
 })
@@ -273,15 +135,9 @@ onUnmounted(() => {
   background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
   mix-blend-mode: screen;
 }
-.lock-shimmer.red {
-  background: radial-gradient(circle, rgba(255, 0, 0, 0.4), transparent 80%);
-}
-.lock-shimmer.orange {
-  background: radial-gradient(circle, rgba(255, 140, 0, 0.35), transparent 80%);
-}
-.lock-shimmer.green {
-  background: radial-gradient(circle, rgba(0, 255, 150, 0.4), transparent 80%);
-}
+.lock-shimmer.red { background: radial-gradient(circle, rgba(255, 0, 0, 0.4), transparent 80%); }
+.lock-shimmer.orange { background: radial-gradient(circle, rgba(255, 140, 0, 0.5), transparent 80%); }
+.lock-shimmer.green { background: radial-gradient(circle, rgba(0, 255, 150, 0.5), transparent 80%); }
 .shimmer { animation: pulse 1.3s infinite; }
 @keyframes pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
@@ -297,24 +153,9 @@ onUnmounted(() => {
   z-index: 4;
   transition: transform 0.3s ease, background 0.2s ease, border 0.2s ease;
 }
-.indicator-red {
-  width: 24px;
-  height: 24px;
-  background: rgba(255, 0, 0, 0.25);
-  border: 2px solid red;
-}
-.indicator-orange {
-  width: 34px;
-  height: 34px;
-  background: rgba(255, 140, 0, 0.15);
-  border: 2px solid orange;
-}
-.indicator-green {
-  width: 45px;
-  height: 45px;
-  background: rgba(0, 255, 150, 0.12);
-  border: 2px solid #00ff8a;
-}
+.indicator-red { width: 24px; height: 24px; background: rgba(255, 0, 0, 0.25); border: 2px solid red; }
+.indicator-orange { width: 34px; height: 34px; background: rgba(255, 140, 0, 0.15); border: 2px solid orange; }
+.indicator-green { width: 45px; height: 45px; background: rgba(0, 255, 149, 0.48); border: 2px solid #00ff8a; }
 
 .lock-img {
   position: absolute;
@@ -326,27 +167,9 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-.progress-hud {
-  display: flex;
-  justify-content: center;
-  gap: 18px;
-  padding: 20px 0 10px;
-  z-index: 5;
-}
-.circle {
-  width: 24px;
-  height: 24px;
-  border: 2px solid white;
-  border-radius: 50%;
-  background-color: transparent;
-  transition: background 0.3s ease;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.3);
-}
-.circle.filled { background-color: #00ff6e; }
-
 .dietrich-svg {
   position: absolute;
-  top: 0;
+  top: 20px;
   left: 0;
   width: 500px;
   height: 500px;
@@ -385,8 +208,8 @@ onUnmounted(() => {
   left: 50%;
   transform: translateX(-50%);
   width: 90%;
-  height: 30px;
-  background: rgba(0, 0, 0, 0.3);
+  height: 40px;
+  background: rgba(0, 0, 0, 0.5);
   border-radius: 10px;
   appearance: none;
   outline: none;
@@ -394,11 +217,11 @@ onUnmounted(() => {
 }
 .angle-slider::-webkit-slider-thumb {
   appearance: none;
-  width: 26px;
-  height: 26px;
+  width: 36px;
+  height: 36px;
   background: #2aa7a1;
   border-radius: 50%;
-  box-shadow: 0 0 10px #2aa7a1;
+  box-shadow: 0 0 15px #2aa7a1;
   cursor: pointer;
   transition: transform 0.2s ease;
 }
@@ -415,14 +238,65 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.status {
-  position: absolute;
-  top: 70px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 22px;
-  color: #ffffff;
-  font-family: monospace;
-  z-index: 6;
+.progress-hud {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  padding: 20px 0 10px;
+  z-index: 5;
 }
+.circle {
+  width: 24px;
+  height: 24px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background-color: transparent;
+  transition: background 0.3s ease;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.3);
+}
+.circle.filled {
+  background-color: #00ff6e;
+  border-color: #00ff6e;
+}
+
+.status {
+  font-size: 22px;
+  color: white;
+  font-family: monospace;
+  padding: 10px 20px;
+  border-radius: 8px;
+  text-align: center;
+  background-color: rgba(0, 0, 0, 0.8);
+  border: 1px solid white; /* fallback */
+  transition: all 0.3s ease;
+}
+.status.success {
+  border-color: #00ff6e;
+  color: #00ff6e;
+}
+.status.fail {
+  border-color: #ff4d4d;
+  color: #ff4d4d;
+}
+
+.result-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  width: 70%;
+  animation: fadein 0.5s ease-in-out;
+}
+
+@keyframes fadein {
+  from { opacity: 0; transform: translate(-50%, -60%); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+@keyframes flashIn {
+  0% { opacity: 0; transform: translateX(-50%) scale(0.9); }
+  100% { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+
 </style>
