@@ -1,42 +1,51 @@
+<!-- src/components/LockPick.vue -->
 <template>
   <div class="lockpick-container">
-    <!-- HUD -->
-    
-    <!-- Fortschrittsanzeige (3 Kreise für lock, pick, final) -->
+    <!-- Progress -->
     <div class="progress-hud">
       <div class="circle" :class="{ filled: ['pick', 'final', 'done'].includes(store.phase) }"></div>
       <div class="circle" :class="{ filled: ['final', 'done'].includes(store.phase) }"></div>
       <div class="circle" :class="{ filled: store.phase === 'done' }"></div>
     </div>
 
-    <!-- Shimmer Lock Feedback -->
-    <div
-      v-if="store.phase !== 'final'"
-      class="lock-shimmer"
-      :class="store.shimmerClass"
-    />
+    <!-- Shimmer Phase 1 -->
+    <div v-if="store.phase === 'lock'" class="lock-shimmer" :class="store.shimmerClass" />
 
-    <!-- Pick Feedback Indicator -->
+    <!-- Indicator Phase 2 -->
     <div
-      v-if="store.phase !== 'lock' && store.phase !== 'final'"
+      v-if="store.phase === 'pick'"
       class="center-indicator"
       :class="store.feedbackLevel"
       :style="{ transform: `translate(-50%, -50%) scale(${store.pulseScale})` }"
     />
 
-    <!-- Lock Image -->
-    <img src="/schloss.png" class="lock-img" :style="lockStyle" />
+    <!-- Lock -->
+    <img
+      src="/schloss.png"
+      class="lock-img"
+      :style="{
+        transform: `translate(-50%, -50%) rotate(${store.lockRotation}deg) scale(${1 + store.vibrationIntensity * 0.05})`,
+        filter: `drop-shadow(0 0 ${10 + store.vibrationIntensity * 40}px #2aa7a1)`
+      }"
+    />
 
+    <!-- Result -->
     <div class="result-box" v-if="store.lockUnlocked || store.isBroken">
-  <div class="status" :class="{ success: store.lockUnlocked, fail: store.isBroken }">
-    {{ store.lockUnlocked ? '✅ Schloss geöffnet!' : '💥 Dietrich gebrochen!' }}
-  </div>
-</div>
+      <div class="status" :class="{ success: store.lockUnlocked, fail: store.isBroken }">
+        {{ store.lockUnlocked ? '✅ Schloss geöffnet!' : '💥 Dietrich gebrochen!' }}
+      </div>
+    </div>
 
-    <!-- Dietrich SVG -->
+    <!-- Dietrich -->
     <svg class="dietrich-svg" width="500" height="500">
       <g
-        :transform="`rotate(${store.hasLockedPick ? store.lockedPickAngle : store.currentAngle}, 250, 290)`"
+        :transform="`rotate(${
+          store.phase === 'final'
+            ? store.currentAngle
+            : store.hasLockedPick
+              ? store.lockedPickAngle
+              : store.currentAngle
+        }, 250, 290)`"
         :class="{ broken: store.isBroken, damaged: store.isDamaged }"
       >
         <line
@@ -53,11 +62,11 @@
       </g>
     </svg>
 
-    <!-- Schraubenzieher -->
+    <!-- Screwdriver -->
     <img
       src="/schraubenzieher.png"
       class="screwdriver-img"
-      :class="{ active: store.isRotating || store.phase === 'sync' || store.phase === 'final' }"
+      :class="{ active: store.isRotating }"
     />
 
     <!-- Slider -->
@@ -68,34 +77,27 @@
       :value="store.currentAngle"
       @input="onAngleInput"
       class="angle-slider"
-      :disabled="store.phase === 'lock' || store.lockUnlocked"
+      :disabled="store.phase === 'lock' || store.lockUnlocked || store.isBroken"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, computed } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useLockStore } from '@/store/lockStore'
 
 const store = useLockStore()
 
 function handleKey(e: KeyboardEvent) {
-  if (e.code === 'KeyA') {
-    e.type === 'keydown' ? store.startRotation('left') : store.stopRotation()
-  } else if (e.code === 'KeyD') {
-    e.type === 'keydown' ? store.startRotation('right') : store.stopRotation()
-  }
+  if (store.lockUnlocked || store.isBroken) return
+  if (e.code === 'KeyA') e.type === 'keydown' ? store.startRotation('left') : store.stopRotation()
+  else if (e.code === 'KeyD') e.type === 'keydown' ? store.startRotation('right') : store.stopRotation()
 }
 
 function onAngleInput(e: Event) {
   const val = (e.target as HTMLInputElement)?.valueAsNumber
   store.setCurrentAngle(val)
-  store.checkLockProgress()
 }
-
-const lockStyle = computed(() => ({
-  transform: `translate(-50%, -50%) rotate(${store.lockRotation}deg)`
-}))
 
 onMounted(() => {
   store.initLock()
@@ -115,12 +117,18 @@ onUnmounted(() => {
   width: 500px;
   height: 600px;
   margin: 40px auto;
-  background: rgba(10, 10, 10, 0.75);
   border-radius: 20px;
   border: 1px solid #2aa7a1;
   overflow: hidden;
   box-shadow: 0 0 40px rgba(42, 167, 161, 0.2);
+  background-color: rgba(10, 10, 10, 0.75);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 80px 80px;
+  backdrop-filter: blur(2px);
 }
+
 
 .lock-shimmer {
   position: absolute;
@@ -135,10 +143,11 @@ onUnmounted(() => {
   background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
   mix-blend-mode: screen;
 }
-.lock-shimmer.red { background: radial-gradient(circle, rgba(255, 0, 0, 0.4), transparent 80%); }
+.lock-shimmer.red    { background: radial-gradient(circle, rgba(255, 0, 0, 0.4), transparent 80%); }
 .lock-shimmer.orange { background: radial-gradient(circle, rgba(255, 140, 0, 0.5), transparent 80%); }
-.lock-shimmer.green { background: radial-gradient(circle, rgba(0, 255, 150, 0.5), transparent 80%); }
+.lock-shimmer.green  { background: radial-gradient(circle, rgba(0, 255, 150, 0.5), transparent 80%); }
 .shimmer { animation: pulse 1.3s infinite; }
+
 @keyframes pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
   50% { transform: translate(-50%, -50%) scale(1.07); }
@@ -153,9 +162,9 @@ onUnmounted(() => {
   z-index: 4;
   transition: transform 0.3s ease, background 0.2s ease, border 0.2s ease;
 }
-.indicator-red { width: 24px; height: 24px; background: rgba(255, 0, 0, 0.25); border: 2px solid red; }
+.indicator-red    { width: 24px; height: 24px; background: rgba(255, 0, 0, 0.25); border: 2px solid red; }
 .indicator-orange { width: 34px; height: 34px; background: rgba(255, 140, 0, 0.15); border: 2px solid orange; }
-.indicator-green { width: 45px; height: 45px; background: rgba(0, 255, 149, 0.48); border: 2px solid #00ff8a; }
+.indicator-green  { width: 45px; height: 45px; background: rgba(0, 255, 149, 0.48); border: 2px solid #00ff8a; }
 
 .lock-img {
   position: absolute;
@@ -176,12 +185,8 @@ onUnmounted(() => {
   pointer-events: none;
   z-index: 4;
 }
-.dietrich-svg g {
-  transition: transform 0.25s ease-in-out;
-}
-.dietrich-svg .broken {
-  opacity: 0.2;
-}
+.dietrich-svg g { transition: transform 0.25s ease-in-out; }
+.dietrich-svg .broken { opacity: 0.2; }
 .dietrich-svg .damaged line {
   stroke: #ff4d4d;
   filter: drop-shadow(0 0 2px #ff4d4d);
@@ -228,15 +233,6 @@ onUnmounted(() => {
 .angle-slider::-webkit-slider-thumb:active {
   transform: scale(0.9);
 }
-.angle-slider::-moz-range-thumb {
-  width: 26px;
-  height: 26px;
-  background: #2aa7a1;
-  border: none;
-  border-radius: 50%;
-  box-shadow: 0 0 10px #2aa7a1;
-  cursor: pointer;
-}
 
 .progress-hud {
   display: flex;
@@ -267,17 +263,10 @@ onUnmounted(() => {
   border-radius: 8px;
   text-align: center;
   background-color: rgba(0, 0, 0, 0.8);
-  border: 1px solid white; /* fallback */
-  transition: all 0.3s ease;
+  border: 1px solid white;
 }
-.status.success {
-  border-color: #00ff6e;
-  color: #00ff6e;
-}
-.status.fail {
-  border-color: #ff4d4d;
-  color: #ff4d4d;
-}
+.status.success { border-color: #00ff6e; color: #00ff6e; }
+.status.fail { border-color: #ff4d4d; color: #ff4d4d; }
 
 .result-box {
   position: absolute;
@@ -288,15 +277,8 @@ onUnmounted(() => {
   width: 70%;
   animation: fadein 0.5s ease-in-out;
 }
-
 @keyframes fadein {
   from { opacity: 0; transform: translate(-50%, -60%); }
   to   { opacity: 1; transform: translate(-50%, -50%); }
 }
-
-@keyframes flashIn {
-  0% { opacity: 0; transform: translateX(-50%) scale(0.9); }
-  100% { opacity: 1; transform: translateX(-50%) scale(1); }
-}
-
 </style>
